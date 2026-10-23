@@ -48,6 +48,34 @@ public enum Library {
         return assets
     }
 
+    public static func assets(withIDs ids: [String]) -> [String: PHAsset] {
+        var assets: [String: PHAsset] = [:]
+        PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil).enumerateObjects { asset, _, _ in
+            assets[asset.localIdentifier] = asset
+        }
+        return assets
+    }
+
+    /// Writes the original photo or video (with any edits) to a temporary file, downloading it from
+    /// iCloud if that's where it lives, so it can be AirDropped or attached like any other file.
+    public static func export(_ asset: PHAsset) async throws -> URL {
+        let resources = PHAssetResource.assetResources(for: asset)
+        let preferred: [PHAssetResourceType] = asset.mediaType == .video
+            ? [.fullSizeVideo, .video]
+            : [.fullSizePhoto, .photo]
+        guard let resource = preferred.lazy.compactMap({ type in resources.first { $0.type == type } }).first
+            ?? resources.first
+        else { throw CocoaError(.fileNoSuchFile) }
+
+        let folder = URL.temporaryDirectory.appending(path: "Peek/\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appending(path: resource.originalFilename)
+        let options = PHAssetResourceRequestOptions()
+        options.isNetworkAccessAllowed = true
+        try await PHAssetResourceManager.default().writeData(for: resource, toFile: file, options: options)
+        return file
+    }
+
     public static func item(for asset: PHAsset) -> Item {
         Item(
             id: asset.localIdentifier,

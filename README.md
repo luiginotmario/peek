@@ -7,13 +7,19 @@ a tiny, open-source mac menu bar app that finds any photo or video in your libra
 - native swift. the search model runs on your mac's neural engine, so the cpu stays at ~0% even while it indexes.
 - fast: searching ~19,000 photos takes about 10 ms.
 
-> early days: the search engine works and you drive it from the terminal. the menu bar panel comes next.
+> early days: no signed download yet. build it yourself (below) and click the mosaic in your menu bar.
 
 ## how it works
 
 1. **index once.** peek reads your photos library and turns every photo into a list of 768 numbers that describe what's in it. videos get one of those lists for every two seconds of footage. it uses [siglip 2](https://huggingface.co/google/siglip2-base-patch16-256), an open model from google (apache-2.0), running on the neural engine at ~14 photos a second. new photos are added as they show up; deleted ones drop out.
 2. **search instantly.** your words go through the same model and come out as 768 numbers in the same space. the photos whose numbers sit closest to yours are the best matches, and for videos peek remembers the moment. it's one matrix multiply over the whole library.
 3. **filter with what photos already knows:** date, place, favorites, and the kind of shot (live photo, portrait, panorama, screenshot, video).
+
+## good to know
+
+- the only network traffic is apple's photos service fetching your own photos from icloud, when a thumbnail or the original isn't on this mac yet. peek itself has no networking code.
+- "me" doesn't work yet. siglip knows "a guy and a girl", not who you are. a pick-your-face step is next.
+- videos kept only in icloud are searched by their poster frame; videos on this mac get a frame every two seconds.
 
 the index lives in `~/Library/Application Support/Peek/Index`, about 1.5 KB per photo.
 
@@ -43,7 +49,7 @@ make changes on a pr and i'll build a new version :)
 
 ```
 Sources/PeekCore   swift   photos library, the two siglip encoders and the index
-Sources/Peek       swift   the app (terminal commands for now)
+Sources/Peek       swift   the menu bar panel (swiftui + appkit), plus terminal commands for testing
 scripts/           python  convert-model.py turns siglip 2 into core ml, once
 ```
 

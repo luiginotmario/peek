@@ -33,7 +33,8 @@ public struct Indexer {
 
         let pending = assets.filter { !index.contains($0.localIdentifier) }
         let encoder = try ImageEncoder(files: files)
-        progress(Progress(done: 0, total: pending.count))
+        let already = assets.count - pending.count
+        progress(Progress(done: already, total: assets.count))
 
         var done = 0
         for start in stride(from: 0, to: pending.count, by: Self.batchSize) {
@@ -44,7 +45,7 @@ public struct Indexer {
                 index.add(Library.item(for: asset), vectors: zip(frames, vectors).map { ($0.time, $1) })
             }
             done += batch.count
-            progress(Progress(done: done, total: pending.count))
+            progress(Progress(done: already + done, total: assets.count))
             if start / Self.batchSize % 10 == 9 { try index.save(to: folder) } // keep progress if interrupted
         }
         try index.save(to: folder)
