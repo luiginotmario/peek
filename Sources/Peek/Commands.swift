@@ -14,6 +14,7 @@ enum Commands {
         case "index": try await index()
         case "search": try await search(Array(arguments.dropFirst()))
         case "tokens": try await tokens(arguments.dropFirst().joined(separator: " "))
+        case "serve": await Engine().serve() // the menu bar app's engine, spoken to over stdin/stdout
         default:
             print("""
             peek index                                   embed every photo and video not yet indexed

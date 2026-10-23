@@ -24,10 +24,11 @@ public struct Indexer {
         self.folder = folder
     }
 
+    /// Pass the index you already have loaded to avoid reading it from disk a second time.
     @concurrent
-    public func run(progress: @Sendable (Progress) -> Void) async throws -> Index {
+    public func run(from loaded: Index? = nil, progress: @Sendable (Progress) -> Void) async throws -> Index {
         let meta = try SiglipMeta(contentsOf: files.meta)
-        var index = try Index.load(from: folder, dimensions: meta.dimensions)
+        var index = try loaded ?? Index.load(from: folder, dimensions: meta.dimensions)
         let assets = Library.assets()
         index.keep(only: Set(assets.map(\.localIdentifier)))
 
@@ -41,7 +42,11 @@ public struct Indexer {
         for start in stride(from: 0, to: pending.count, by: Self.batchSize) {
             try Task.checkCancellation()
             let batch = Array(pending[start ..< min(start + Self.batchSize, pending.count)])
-            for (asset, frames) in await Self.frames(for: batch, side: meta.imageSize) where !frames.isEmpty {
+            for (asset, frames) in await Self.frames(for: batch, side: meta.imageSize) {
+                guard !frames.isEmpty else {
+                    index.markUnreadable(asset.localIdentifier)
+                    continue
+                }
                 let vectors = try encoder.encode(frames.map(\.image))
                 index.add(Library.item(for: asset), vectors: zip(frames, vectors).map { ($0.time, $1) })
             }

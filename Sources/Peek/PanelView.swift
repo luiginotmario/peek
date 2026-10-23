@@ -1,5 +1,4 @@
 import AppKit
-import PeekCore
 import SwiftUI
 
 // motion tokens: a steep start and a long tail (easeOutQuint) for everything the system does
@@ -64,7 +63,8 @@ struct PanelView: View {
                 }
             }
         case .found(let matches):
-            Found(matches: matches, filters: search.filters, thumbnails: search.thumbnails, namespace: tiles)
+            Found(matches: matches, filters: search.filters, thumbnails: search.thumbnails, namespace: tiles,
+                  export: search.export)
         case .nothing:
             Nothing(status: search.status)
         }
@@ -152,7 +152,7 @@ private struct Skeleton: View {
 
     var body: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: ScanGrid.columns), spacing: 6) {
-            ForEach(0..<Search.candidates, id: \.self) { position in
+            ForEach(0..<Engine.candidates, id: \.self) { position in
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .fill(.primary.opacity(0.1))
                     .aspectRatio(1, contentMode: .fit)
@@ -177,6 +177,7 @@ private struct Found: View {
     let filters: [String]
     let thumbnails: [String: CGImage]
     let namespace: Namespace.ID
+    let export: ([String]) async -> [URL]
 
     @State private var selected: Set<String> = []
     @State private var shown = false
@@ -228,7 +229,7 @@ private struct Found: View {
     private func share(_ destination: Sharing.Destination, _ anchor: CGRect) {
         sharing = true
         Task {
-            await Sharing.share(chosen, to: destination, anchor: anchor)
+            Sharing.share(await export(chosen), to: destination, anchor: anchor)
             sharing = false
         }
     }

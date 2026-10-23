@@ -1,19 +1,10 @@
-import CoreGraphics
-import Darwin
 import Foundation
+import ImageIO
 import Observation
-import PeekCore
 
-/// One thumbnail in the panel.
-struct Result: Identifiable, Hashable {
-    let id: String
-    let kind: Item.Kind
-    let time: Double
-    let cosine: Float
-    var isMatch: Bool
-}
-
-/// Everything the panel shows, and the work behind it.
+/// Everything the panel shows. The work itself happens in the engine process (see Engine.swift);
+/// this side only keeps the few thumbnails on screen, and lets go of those a minute after the
+/// panel closes.
 @Observable
 final class Search {
     enum Phase: Equatable {
@@ -37,75 +28,57 @@ final class Search {
     private(set) var thumbnails: [String: CGImage] = [:]
     /// The filters the last query was read as, like ["goa", "summer 2025"], shown next to the count.
     private(set) var filters: [String] = []
+    /// Called when the panel has been put away long enough to let go of everything.
+    var onRest: () -> Void = {}
 
-    /// How many candidates fill the grid, and the most that can count as matches.
-    static let candidates = 24
-    static let maxMatches = 8
-    /// A candidate is a match when it's this close to the best one. SigLIP's cosines sit in a narrow
-    /// band, so a gap from the top separates "this" from "sort of like this" better than a fixed cutoff.
-    static let matchMargin: Float = 0.012
-
-    private let models = Commands.models
-    private let indexFolder = Commands.indexFolder
-    private var index: Index?
-    private var encoder: TextEncoder?
-    private var places: Places?
-    private var unload: Task<Void, Never>?
+    private let engine = EngineClient()
+    private var rest: Task<Void, Never>?
     private var running: Task<Void, Never>?
 
+    init() {
+        engine.onEvent = { [weak self] response in self?.receive(response) }
+    }
 
-    // MARK: Library
-
-    /// Asks for access the first time, then brings the index up to date with anything new since
-    /// the panel last opened. Cheap when nothing changed.
-    func prepareLibrary() async {
-        if case .indexing = status { return }
-        switch await Library.requestAccess() {
+    private func receive(_ response: Response) {
+        switch response.event {
         case .denied:
             status = .denied
-            return
-        case .full, .limited:
+        case .progress:
+            status = .indexing(done: response.done ?? 0, total: response.total ?? 0)
+        case .indexed:
+            status = .ready(count: response.count ?? 0)
+        case .looking:
+            filters = response.filters ?? []
+            if case .looking = phase { phase = .looking(response.count ?? 0) }
+        default:
             break
         }
-        if status == .unknown { status = .indexing(done: 0, total: 0) }
-        do {
-            let fresh = try await Indexer(files: models, folder: indexFolder).run { progress in
-                Task { @MainActor [weak self] in self?.status = .indexing(done: progress.done, total: progress.total) }
-            }
-            index = fresh
-            status = .ready(count: fresh.count)
-        } catch {
-            status = .ready(count: index?.count ?? 0)
+    }
+
+    // MARK: Panel
+
+    /// The panel opened: catch the index up on new photos (which also starts the engine, so the
+    /// first search doesn't wait for it).
+    func opened() {
+        rest?.cancel()
+        engine.send(Request(operation: .index))
+    }
+
+    /// The panel closed. A minute later the thumbnails go too; the engine quits on its own.
+    func closed() {
+        rest?.cancel()
+        rest = Task {
+            try? await Task.sleep(for: .seconds(60))
+            guard !Task.isCancelled else { return }
+            running?.cancel()
+            thumbnails = [:]
+            phase = .idle
+            query = ""
+            onRest()
         }
     }
 
     // MARK: Search
-
-    /// The panel opened: load the text model now so the first search feels instant.
-    func warmUp() {
-        unload?.cancel()
-        guard encoder == nil else { return }
-        Task {
-            encoder = try? await TextEncoder(files: models)
-        }
-    }
-
-    /// The panel closed: give the memory back after a minute of not searching.
-    func coolDown() {
-        unload?.cancel()
-        unload = Task {
-            try? await Task.sleep(for: .seconds(60))
-            guard !Task.isCancelled else { return }
-            encoder = nil
-            places = nil
-            thumbnails = [:]
-            phase = .idle
-            query = ""
-            if case .ready = status { index = nil }
-            // the tokenizer leaves thousands of small freed blocks behind; hand those pages back to macOS
-            malloc_zone_pressure_relief(nil, 0)
-        }
-    }
 
     func submit() {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -120,37 +93,17 @@ final class Search {
     }
 
     private func run(_ text: String) async {
-        do {
-            let index = try loadedIndex()
-            let places = try loadedPlaces()
-            let parsed = Query.parse(text, places: places)
-            let include = { (item: Item) in parsed.includes(item, places: places) }
-            filters = parsed.labels
-            phase = .looking(parsed.isFiltered ? index.count(where: include) : index.count)
-
-            let hits = parsed.text.isEmpty
-                ? index.newest(limit: Self.candidates, where: include) // only filters: newest first
-                : index.search(try await loadedEncoder().encode(parsed.text), limit: Self.candidates, where: include)
-            guard let best = hits.first else {
-                phase = .nothing
-                return
-            }
-
-            var results = hits.map {
-                Result(id: $0.item.id, kind: $0.item.kind, time: $0.time, cosine: $0.cosine, isMatch: false)
-            }
-            for i in results.indices.prefix(Self.maxMatches)
-            where parsed.text.isEmpty || results[i].cosine >= best.cosine - Self.matchMargin {
-                results[i].isMatch = true
-            }
-            await loadThumbnails(for: results.map(\.id))
-            try Task.checkCancellation()
-            phase = .scanning(results, parsed.isFiltered ? index.count(where: include) : index.count)
-        } catch is CancellationError {
-            return
-        } catch {
+        phase = .looking(status.count)
+        let response = await engine.ask(.search, query: text)
+        guard !Task.isCancelled else { return }
+        guard response.event == .results, let results = response.results, !results.isEmpty else {
             phase = .nothing
+            return
         }
+        filters = response.filters ?? []
+        thumbnails = await Self.load(results)
+        guard !Task.isCancelled else { return }
+        phase = .scanning(results, response.count ?? 0)
     }
 
     /// The view calls this when the scan line has passed the last row.
@@ -159,42 +112,31 @@ final class Search {
         phase = .found(results.filter(\.isMatch))
     }
 
-    private func loadedEncoder() async throws -> TextEncoder {
-        if let encoder { return encoder }
-        let fresh = try await TextEncoder(files: models)
-        encoder = fresh
-        return fresh
+    /// Originals of the picked photos as files, ready for AirDrop or Messages.
+    func export(_ ids: [String]) async -> [URL] {
+        let response = await engine.ask(.export, ids: ids)
+        return (response.files ?? []).map { URL(filePath: $0) }
     }
 
-    private func loadedPlaces() throws -> Places {
-        if let places { return places }
-        let fresh = try Places(contentsOf: Commands.places)
-        places = fresh
-        return fresh
-    }
-
-    private func loadedIndex() throws -> Index {
-        if let index { return index }
-        let meta = try SiglipMeta(contentsOf: models.folder.appending(path: "siglip.json"))
-        let fresh = try Index.load(from: indexFolder, dimensions: meta.dimensions)
-        if case .ready = status { index = fresh } // while indexing, reload each time to see new photos
-        return fresh
-    }
-
-    private func loadThumbnails(for ids: [String]) async {
-        let missing = ids.filter { thumbnails[$0] == nil }
-        let assets = Library.assets(withIDs: missing)
-        let loaded = await withTaskGroup(of: (String, CGImage?).self) { group in
-            for (id, asset) in assets {
-                group.addTask { (id, await Library.thumbnail(for: asset, side: 360)) }
-            }
-            var loaded: [String: CGImage] = [:]
-            for await (id, image) in group {
-                loaded[id] = image
-            }
-            return loaded
+    @concurrent
+    private static func load(_ results: [Result]) async -> [String: CGImage] {
+        var images: [String: CGImage] = [:]
+        for result in results {
+            guard let path = result.thumbnail,
+                  let source = CGImageSourceCreateWithURL(URL(filePath: path) as CFURL, nil),
+                  let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { continue }
+            images[result.id] = image
         }
-        thumbnails.merge(loaded.compactMapValues(\.self)) { $1 }
-        if thumbnails.count > 400 { thumbnails = thumbnails.filter { ids.contains($0.key) } }
+        return images
+    }
+}
+
+private extension Search.Status {
+    var count: Int {
+        switch self {
+        case .indexing(let done, _): done
+        case .ready(let count): count
+        default: 0
+        }
     }
 }

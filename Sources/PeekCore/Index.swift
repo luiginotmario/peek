@@ -22,11 +22,14 @@ public struct Index: Sendable {
         var dimensions: Int
         var entries: [Entry]
         var items: [String: Item]
+        var unreadable: Set<String>?
     }
 
     public let dimensions: Int
     public private(set) var entries: [Entry] = []
     public private(set) var items: [String: Item] = [:]
+    /// Items Photos couldn't give us any image for. Remembered so they aren't retried every time.
+    public private(set) var unreadable: Set<String> = []
     private var vectors: [Float] = []   // entries.count × dimensions, row-major
 
     public init(dimensions: Int) {
@@ -35,7 +38,11 @@ public struct Index: Sendable {
 
     public var count: Int { items.count }
 
-    public func contains(_ id: String) -> Bool { items[id] != nil }
+    public func contains(_ id: String) -> Bool { items[id] != nil || unreadable.contains(id) }
+
+    public mutating func markUnreadable(_ id: String) {
+        unreadable.insert(id)
+    }
 
     public mutating func add(_ item: Item, vectors itemVectors: [(time: Double, vector: [Float])]) {
         precondition(itemVectors.allSatisfy { $0.vector.count == dimensions }, "vector size doesn't match the index")
@@ -49,6 +56,7 @@ public struct Index: Sendable {
     /// Drops everything that's no longer in the library.
     public mutating func keep(only ids: Set<String>) {
         let kept = entries.indices.filter { ids.contains(entries[$0].id) }
+        unreadable.formIntersection(ids)
         guard kept.count < entries.count else { return }
         vectors = kept.flatMap { vectors[$0 * dimensions ..< ($0 + 1) * dimensions] }
         entries = kept.map { entries[$0] }
@@ -105,13 +113,14 @@ public struct Index: Sendable {
 
         index.entries = manifest.entries
         index.items = manifest.items
+        index.unreadable = manifest.unreadable ?? []
         index.vectors = halves.withUnsafeBytes { widen($0) }
         return index
     }
 
     public func save(to folder: URL) throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let manifest = Manifest(dimensions: dimensions, entries: entries, items: items)
+        let manifest = Manifest(dimensions: dimensions, entries: entries, items: items, unreadable: unreadable)
         try JSONEncoder().encode(manifest).write(to: folder.appending(path: "entries.json"), options: .atomic)
         try narrow(vectors).write(to: folder.appending(path: "vectors.f16"), options: .atomic)
     }

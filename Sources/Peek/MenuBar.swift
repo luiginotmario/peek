@@ -6,7 +6,8 @@ import SwiftUI
 final class MenuBar: NSObject {
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let search = Search()
-    private lazy var panel = Panel(search: search)
+    /// Built when it's first opened and thrown away once it's been put away for a while.
+    private var panel: Panel?
 
     override init() {
         super.init()
@@ -15,7 +16,16 @@ final class MenuBar: NSObject {
         item.button?.target = self
         item.button?.action = #selector(toggle)
         item.button?.sendAction(on: [.leftMouseDown, .rightMouseDown])
-        panel.onDismiss = { [weak self] in self?.close() }
+        search.onRest = { [weak self] in
+            self?.panel?.close() // an ordered-out window stays in appkit's window list until it's closed
+            self?.panel = nil
+            // the window's views are released on the next pass of the run loop; after that, hand the
+            // freed pages back to macOS
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                malloc_zone_pressure_relief(nil, 0)
+            }
+        }
         // development: `open build/Peek.app --env PEEK_OPEN="a query"` opens the panel and searches
         if let query = ProcessInfo.processInfo.environment["PEEK_OPEN"] {
             Task {
@@ -35,7 +45,7 @@ final class MenuBar: NSObject {
                 if let path = ProcessInfo.processInfo.environment["PEEK_SNAPSHOT"] {
                     for (step, delay) in [0.3, 0.9, 1.4, 2.4, 3.5].enumerated() {
                         try? await Task.sleep(for: .seconds(step == 0 ? delay : delay - [0.3, 0.9, 1.4, 2.4, 3.5][step - 1]))
-                        panel.snapshot(to: URL(filePath: "\(path)-\(step).png"))
+                        panel?.snapshot(to: URL(filePath: "\(path)-\(step).png"))
                     }
                 }
             }
@@ -50,7 +60,7 @@ final class MenuBar: NSObject {
     @objc private func toggle() {
         if NSApp.currentEvent?.type == .rightMouseDown {
             showMenu()
-        } else if panel.isVisible {
+        } else if panel?.isVisible == true {
             close()
         } else {
             open()
@@ -60,17 +70,19 @@ final class MenuBar: NSObject {
     private func open() {
         guard let button = item.button, let window = button.window else { return }
         let anchor = window.convertToScreen(button.convert(button.bounds, to: nil))
+        let panel = self.panel ?? Panel(search: search)
+        panel.onDismiss = { [weak self] in self?.close() }
+        self.panel = panel
         panel.place(below: anchor)
         NSApp.activate()
         panel.makeKeyAndOrderFront(nil)
-        search.warmUp()
-        Task { await search.prepareLibrary() }
+        search.opened()
     }
 
     private func close() {
-        guard panel.isVisible else { return }
+        guard let panel, panel.isVisible else { return }
         panel.orderOut(nil)
-        search.coolDown()
+        search.closed()
     }
 
     private func showMenu() {
@@ -122,6 +134,7 @@ final class Panel: NSPanel {
         isMovableByWindowBackground = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         animationBehavior = .none
+        isReleasedWhenClosed = false // swift owns it
 
         let glass = NSVisualEffectView()
         glass.material = .popover
