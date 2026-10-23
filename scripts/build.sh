@@ -24,6 +24,17 @@ for bundle in "$bin"/*.bundle; do
   [ -e "$bundle" ] && cp -R "$bundle" "$app/Contents/Resources/"
 done
 
+echo "→ icon"
+work=$(mktemp -d)
+mkdir "$work/Peek.iconset"
+swift scripts/render-svg.swift App/AppIcon.svg "$work/icon" 16 32 64 128 256 512 1024
+for size in 16 32 128 256 512; do
+  cp "$work/icon-$size.png" "$work/Peek.iconset/icon_${size}x${size}.png"
+  cp "$work/icon-$((size * 2)).png" "$work/Peek.iconset/icon_${size}x${size}@2x.png"
+done
+iconutil -c icns "$work/Peek.iconset" -o "$app/Contents/Resources/Peek.icns"
+rm -rf "$work"
+
 echo "→ models"
 for model in ImageEncoder TextEncoder; do
   xcrun coremlcompiler compile "models/$model.mlpackage" "$app/Contents/Resources/Models" >/dev/null
