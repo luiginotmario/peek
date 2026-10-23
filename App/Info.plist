@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Peek</string>
+    <key>CFBundleDisplayName</key>
+    <string>Peek</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.giginotmario.peek</string>
+    <key>CFBundleExecutable</key>
+    <string>Peek</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>__VERSION__</string>
+    <key>CFBundleVersion</key>
+    <string>__VERSION__</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Peek searches your photos and videos on this Mac. Nothing leaves your computer.</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>MIT licensed. Made by @giginotmario.</string>
+</dict>
+</plist>
