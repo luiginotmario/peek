@@ -36,6 +36,8 @@ final class Engine {
     private func handle(_ request: Request) async {
         switch request.operation {
         case .index:
+            // the panel just opened: load the text model while the person types
+            Task { _ = try? await loadedEncoder() }
             if indexing == nil {
                 indexing = Task {
                     await bringIndexUpToDate()
