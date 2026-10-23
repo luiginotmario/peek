@@ -29,6 +29,7 @@ for model in ImageEncoder TextEncoder; do
   xcrun coremlcompiler compile "models/$model.mlpackage" "$app/Contents/Resources/Models" >/dev/null
 done
 cp models/siglip.json "$app/Contents/Resources/Models/"
+cp App/places.json "$app/Contents/Resources/"
 cp models/tokenizer/{tokenizer.json,tokenizer_config.json,special_tokens_map.json} "$app/Contents/Resources/Models/tokenizer/"
 
 # sign with your Developer ID if it's in the keychain, otherwise ad-hoc for local runs

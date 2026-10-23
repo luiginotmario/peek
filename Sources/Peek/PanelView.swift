@@ -51,7 +51,7 @@ struct PanelView: View {
         case .looking(let count), .scanning(_, let count):
             // the skeleton holds the grid's shape from the first frame, so results land in place
             VStack(alignment: .leading, spacing: 12) {
-                Text("looking through \(count.formatted()) photos…")
+                Text("looking through \(count.formatted()) photos" + search.filters.map { " · \($0)" }.joined() + "…")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.secondary)
                 ZStack {
@@ -64,7 +64,7 @@ struct PanelView: View {
                 }
             }
         case .found(let matches):
-            Found(matches: matches, thumbnails: search.thumbnails, namespace: tiles)
+            Found(matches: matches, filters: search.filters, thumbnails: search.thumbnails, namespace: tiles)
         case .nothing:
             Nothing(status: search.status)
         }
@@ -174,6 +174,7 @@ private struct Skeleton: View {
 
 private struct Found: View {
     let matches: [Result]
+    let filters: [String]
     let thumbnails: [String: CGImage]
     let namespace: Namespace.ID
 
@@ -188,7 +189,7 @@ private struct Found: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(matches.count == 1 ? "found 1 photo" : "found \(matches.count) photos")
+            Text((matches.count == 1 ? "found 1 photo" : "found \(matches.count) photos") + filters.map { " · \($0)" }.joined())
                 .font(.system(size: 13, weight: .semibold))
                 .opacity(shown ? 1 : 0)
 
@@ -334,7 +335,7 @@ private struct StatusLabel: View {
 
     var body: some View {
         switch status {
-        case .indexing(let done, let total) where total > 0:
+        case .indexing(let done, let total) where total > 0 && done < total:
             Text("reading library \(Int((Double(done) / Double(total) * 100).rounded(.down)))%")
                 .font(.system(size: 12).monospacedDigit())
                 .foregroundStyle(.tertiary)

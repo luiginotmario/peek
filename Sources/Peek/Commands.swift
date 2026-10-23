@@ -7,6 +7,7 @@ enum Commands {
     static let models = ModelFiles(folder: ProcessInfo.processInfo.environment["PEEK_MODELS"].map { URL(filePath: $0) }
         ?? Bundle.main.resourceURL!.appending(path: "Models"))
     static let indexFolder = URL.applicationSupportDirectory.appending(path: "Peek/Index")
+    static let places = Bundle.main.resourceURL!.appending(path: "places.json")
 
     static func run(_ arguments: [String]) async throws {
         switch arguments.first {
@@ -57,16 +58,23 @@ enum Commands {
         let index = try Index.load(from: indexFolder, dimensions: meta.dimensions)
         guard index.count > 0 else { fail("the index is empty: run `peek index` first") }
         let encoder = try await TextEncoder(files: models)
+        let places = try Places(contentsOf: Self.places)
         let loaded = Date.now
-        let matches = index.search(try encoder.encode(query), limit: limit)
+        let parsed = Query.parse(query, places: places)
+        let include = { (item: Item) in parsed.includes(item, places: places) }
+        let matches = parsed.text.isEmpty
+            ? index.newest(limit: limit, where: include)
+            : index.search(try encoder.encode(parsed.text), limit: limit, where: include)
         let searched = Date.now
 
         print(String(format: "%@ — %d items, load %.0f ms, search %.0f ms", query, index.count,
                      loaded.timeIntervalSince(loading) * 1000, searched.timeIntervalSince(loaded) * 1000))
+        print("  text: \"\(parsed.text)\"  filters: \(parsed.labels.isEmpty ? "none" : parsed.labels.joined(separator: " · "))"
+              + "  (\(index.count(where: include)) items pass)")
         for (rank, match) in matches.enumerated() {
             let item = match.item
             let date = item.created?.formatted(date: .abbreviated, time: .omitted) ?? "—"
-            let place = item.latitude.map { String(format: "%.3f,%.3f", $0, item.longitude ?? 0) } ?? "—"
+            let place = item.latitude.flatMap { places.nearest($0, item.longitude ?? 0)?.name } ?? "—"
             let moment = item.kind == .video ? String(format: " @%.0fs", match.time) : ""
             print(String(format: "%2d  %5.1f%%  cos %.3f  %-10@ %@  %@%@",
                          rank + 1, meta.probability(match.cosine) * 100, match.cosine,

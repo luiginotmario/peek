@@ -1,4 +1,5 @@
 import CoreGraphics
+import Darwin
 import Foundation
 import Observation
 import PeekCore
@@ -34,6 +35,8 @@ final class Search {
     private(set) var phase: Phase = .idle
     private(set) var status: Status = .unknown
     private(set) var thumbnails: [String: CGImage] = [:]
+    /// The filters the last query was read as, like ["goa", "summer 2025"], shown next to the count.
+    private(set) var filters: [String] = []
 
     /// How many candidates fill the grid, and the most that can count as matches.
     static let candidates = 24
@@ -46,15 +49,17 @@ final class Search {
     private let indexFolder = Commands.indexFolder
     private var index: Index?
     private var encoder: TextEncoder?
+    private var places: Places?
     private var unload: Task<Void, Never>?
     private var running: Task<Void, Never>?
 
 
     // MARK: Library
 
-    /// Asks for access the first time, then brings the index up to date in the background.
+    /// Asks for access the first time, then brings the index up to date with anything new since
+    /// the panel last opened. Cheap when nothing changed.
     func prepareLibrary() async {
-        guard status == .unknown else { return }
+        if case .indexing = status { return }
         switch await Library.requestAccess() {
         case .denied:
             status = .denied
@@ -62,7 +67,7 @@ final class Search {
         case .full, .limited:
             break
         }
-        status = .indexing(done: 0, total: 0)
+        if status == .unknown { status = .indexing(done: 0, total: 0) }
         do {
             let fresh = try await Indexer(files: models, folder: indexFolder).run { progress in
                 Task { @MainActor [weak self] in self?.status = .indexing(done: progress.done, total: progress.total) }
@@ -92,7 +97,13 @@ final class Search {
             try? await Task.sleep(for: .seconds(60))
             guard !Task.isCancelled else { return }
             encoder = nil
+            places = nil
+            thumbnails = [:]
+            phase = .idle
+            query = ""
             if case .ready = status { index = nil }
+            // the tokenizer leaves thousands of small freed blocks behind; hand those pages back to macOS
+            malloc_zone_pressure_relief(nil, 0)
         }
     }
 
@@ -111,10 +122,15 @@ final class Search {
     private func run(_ text: String) async {
         do {
             let index = try loadedIndex()
-            phase = .looking(index.count)
-            let encoder = try await loadedEncoder()
-            let query = try encoder.encode(text)
-            let hits = index.search(query, limit: Self.candidates)
+            let places = try loadedPlaces()
+            let parsed = Query.parse(text, places: places)
+            let include = { (item: Item) in parsed.includes(item, places: places) }
+            filters = parsed.labels
+            phase = .looking(parsed.isFiltered ? index.count(where: include) : index.count)
+
+            let hits = parsed.text.isEmpty
+                ? index.newest(limit: Self.candidates, where: include) // only filters: newest first
+                : index.search(try await loadedEncoder().encode(parsed.text), limit: Self.candidates, where: include)
             guard let best = hits.first else {
                 phase = .nothing
                 return
@@ -123,12 +139,13 @@ final class Search {
             var results = hits.map {
                 Result(id: $0.item.id, kind: $0.item.kind, time: $0.time, cosine: $0.cosine, isMatch: false)
             }
-            for i in results.indices.prefix(Self.maxMatches) where results[i].cosine >= best.cosine - Self.matchMargin {
+            for i in results.indices.prefix(Self.maxMatches)
+            where parsed.text.isEmpty || results[i].cosine >= best.cosine - Self.matchMargin {
                 results[i].isMatch = true
             }
             await loadThumbnails(for: results.map(\.id))
             try Task.checkCancellation()
-            phase = .scanning(results, index.count)
+            phase = .scanning(results, parsed.isFiltered ? index.count(where: include) : index.count)
         } catch is CancellationError {
             return
         } catch {
@@ -146,6 +163,13 @@ final class Search {
         if let encoder { return encoder }
         let fresh = try await TextEncoder(files: models)
         encoder = fresh
+        return fresh
+    }
+
+    private func loadedPlaces() throws -> Places {
+        if let places { return places }
+        let fresh = try Places(contentsOf: Commands.places)
+        places = fresh
         return fresh
     }
 

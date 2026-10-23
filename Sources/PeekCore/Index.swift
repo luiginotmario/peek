@@ -78,6 +78,19 @@ public struct Index: Sendable {
             .map(\.self)
     }
 
+    /// For a query that's only filters ("videos from tokyo"): the newest items that pass, newest first.
+    public func newest(limit: Int, where include: (Item) -> Bool) -> [Match] {
+        items.values
+            .filter(include)
+            .sorted { ($0.created ?? .distantPast) > ($1.created ?? .distantPast) }
+            .prefix(limit)
+            .map { Match(item: $0, time: 0, cosine: 0) }
+    }
+
+    public func count(where include: (Item) -> Bool) -> Int {
+        items.values.count(where: include)
+    }
+
     // MARK: Persistence
 
     public static func load(from folder: URL, dimensions: Int) throws -> Index {

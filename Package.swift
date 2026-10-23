@@ -16,6 +16,7 @@ let package = Package(
             name: "PeekCore",
             dependencies: [.product(name: "Tokenizers", package: "swift-transformers")]
         ),
+        .testTarget(name: "PeekCoreTests", dependencies: ["PeekCore"]),
         // the menu bar app
         .executableTarget(
             name: "Peek",

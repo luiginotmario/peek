@@ -32,9 +32,10 @@ public struct Indexer {
         index.keep(only: Set(assets.map(\.localIdentifier)))
 
         let pending = assets.filter { !index.contains($0.localIdentifier) }
-        let encoder = try ImageEncoder(files: files)
         let already = assets.count - pending.count
         progress(Progress(done: already, total: assets.count))
+        guard !pending.isEmpty else { return index } // nothing new: don't even load the image model
+        let encoder = try ImageEncoder(files: files)
 
         var done = 0
         for start in stride(from: 0, to: pending.count, by: Self.batchSize) {

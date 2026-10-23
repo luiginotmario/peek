@@ -24,6 +24,13 @@ final class MenuBar: NSObject {
                 guard !query.isEmpty else { return }
                 search.query = query
                 search.submit()
+                // and `PEEK_CLOSE_AFTER=5` closes it again, to measure what's left once it's put away
+                if let seconds = ProcessInfo.processInfo.environment["PEEK_CLOSE_AFTER"].flatMap(Double.init) {
+                    Task {
+                        try? await Task.sleep(for: .seconds(seconds))
+                        close()
+                    }
+                }
                 // and `PEEK_SNAPSHOT=/tmp/panel` saves what the panel looks like as it goes
                 if let path = ProcessInfo.processInfo.environment["PEEK_SNAPSHOT"] {
                     for (step, delay) in [0.3, 0.9, 1.4, 2.4, 3.5].enumerated() {
