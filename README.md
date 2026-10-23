@@ -1,32 +1,54 @@
-# Peek
+# hi, this is peek
 
-Find any photo or video on your Mac by describing it, then AirDrop it, send it in Messages or share it anywhere. Everything runs on your Mac: no account, no cloud, nothing leaves your computer.
+a tiny, open-source mac menu bar app that finds any photo or video in your library from a description. type "me on a boat at sunset" or "the red mountain", and it finds it in your photos library. then airdrop it, send it in messages, or share it anywhere.
 
-> Early days. Right now Peek is a search engine you drive from the terminal; the menu bar panel is next.
+- free and open source (MIT)
+- 100% local. your photos never leave your mac, and there's no account, no cloud and no tracking.
+- native swift. the search model runs on your mac's neural engine, so the cpu stays at ~0% even while it indexes.
+- fast: searching ~19,000 photos takes about 10 ms.
 
-## How it works
+> early days: the search engine works and you drive it from the terminal. the menu bar panel comes next.
 
-1. **Index once.** Peek reads your Photos library and turns every photo, and a frame every two seconds of every video, into a 768-number vector with [SigLIP 2](https://huggingface.co/google/siglip2-base-patch16-256) (Apache-2.0), running on the Neural Engine. New photos are added incrementally.
-2. **Search instantly.** Your words go through the same model into the same space; the closest vectors are the best matches. One matrix multiply over the whole library.
-3. **Filter with metadata.** Date, place, favorites and media type come straight from Photos.
+## how it works
 
-The index lives in `~/Library/Application Support/Peek/Index` (~1.5 KB per photo).
+1. **index once.** peek reads your photos library and turns every photo into a list of 768 numbers that describe what's in it. videos get one of those lists for every two seconds of footage. it uses [siglip 2](https://huggingface.co/google/siglip2-base-patch16-256), an open model from google (apache-2.0), running on the neural engine at ~14 photos a second. new photos are added as they show up; deleted ones drop out.
+2. **search instantly.** your words go through the same model and come out as 768 numbers in the same space. the photos whose numbers sit closest to yours are the best matches, and for videos peek remembers the moment. it's one matrix multiply over the whole library.
+3. **filter with what photos already knows:** date, place, favorites, and the kind of shot (live photo, portrait, panorama, screenshot, video).
 
-## Build
+the index lives in `~/Library/Application Support/Peek/Index`, about 1.5 KB per photo.
 
-Requires macOS 14+ and Xcode 16+.
+## if you wanna make an addition + pr, or just wanna remix it for yourself, go for it
 
-```sh
-# once: convert the model (python is only needed here, never at runtime)
+you need macos 14+ and xcode 16+.
+
+convert the model once. this is the only step that uses python, and only on your machine; the app never runs it:
+
+```
 uv venv && uv pip install "torch==2.7.0" "transformers>=4.49,<5" "numpy<2.3" coremltools sentencepiece protobuf pillow
 .venv/bin/python scripts/convert-model.py --out models
-
-scripts/build.sh                                  # → build/Peek.app
-scripts/peek.sh index                             # asks for Photos access, then indexes
-scripts/peek.sh search a yellow boat on the ocean
-scripts/peek.sh search sunset --sheet /tmp/sunset.jpg   # results as one contact-sheet image
 ```
 
-## License
+then build and try it:
 
-MIT. The SigLIP 2 weights are Apache-2.0, © Google.
+```
+./scripts/build.sh                                   # → build/Peek.app
+./scripts/peek.sh index                              # asks for photos access, then indexes
+./scripts/peek.sh search a yellow boat on the ocean
+./scripts/peek.sh search sunset --sheet /tmp/sunset.jpg   # the results as one image
+```
+
+make changes on a pr and i'll build a new version :)
+
+## how it's built
+
+```
+Sources/PeekCore   swift   photos library, the two siglip encoders and the index
+Sources/Peek       swift   the app (terminal commands for now)
+scripts/           python  convert-model.py turns siglip 2 into core ml, once
+```
+
+the image half of the model (88 MB, 8-bit) only loads while indexing. the text half (270 MB) only loads while you search. both match the original pytorch model at 0.99+ similarity.
+
+## license
+
+[MIT](LICENSE) — made by [@giginotmario](https://x.com/giginotmario). the siglip 2 weights are apache-2.0, © google.
