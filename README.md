@@ -7,7 +7,11 @@ a tiny, open-source mac menu bar app that finds any photo or video in your libra
 - native swift. the search model runs on your mac's neural engine, so the cpu stays at ~0% even while it indexes.
 - fast: searching ~19,000 photos takes about 10 ms.
 
-> early days: no signed download yet. build it yourself (below) and click the mosaic in your menu bar.
+## download
+
+grab **[Peek.dmg](https://github.com/luiginotmario/peek/releases/latest/download/Peek.dmg)**, open it, drag peek into applications, then click the mosaic in your menu bar. apple silicon, macos 14 or newer.
+
+signed and notarized by apple, so it opens like any other app.
 
 ## how it works
 
